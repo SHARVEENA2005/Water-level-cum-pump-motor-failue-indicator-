@@ -1,0 +1,216 @@
+//arduino uno code
+#include <SoftwareSerial.h>
+SoftwareSerial SIM900(9, 10); // TXpin=9 RXpin=10
+
+#define trigPin 2
+#define echoPin 3
+#define relay 4
+
+int distance;
+String passcode="abc123"; 
+String incoming = "";
+String textForSMS;
+
+// for the timer
+int minutes = 0; 
+int seconds = 0; 
+long int total_seconds = 0; 
+int secflag = 0; 
+int timer_started_flag = 0; 
+ 
+ 
+// Tracks the time since last event fired
+unsigned long previousMillis=0;
+unsigned long int previoussecs = 0; 
+unsigned long int currentsecs = 0; 
+ unsigned long currentMillis = 0;
+  int interval= 1 ; // updated every 1 second
+int tsecs = 0; 
+
+// flags
+
+boolean Zero_Level_Flag = false;
+
+void setup() {
+  //initialize Serial Monitor
+  Serial.begin(9600);
+ pinMode(trigPin, OUTPUT);
+ pinMode(relay, OUTPUT);
+ pinMode(echoPin, INPUT);
+SIM900.begin(9600); // original 19200
+ randomSeed(analogRead(0));
+
+  SIM900.print("AT+CMGF=1\r");  // set SMS mode to text
+  delay(1000);
+  SIM900.print("AT+CNMI=2,2,0,0,0\r"); 
+  // blurt out contents of new SMS upon receipt to the GSM shield's serial out
+  delay(1000);
+     SIM900.println("AT+CMGD=1,4"); // delete all SMS
+   delay(5000);
+  Serial.println("Ready...");
+}
+
+void loop() {
+
+       currentMillis = millis();
+   currentsecs = currentMillis / 1000; 
+    if ((unsigned long)(currentsecs - previoussecs) >= interval) {
+      total_seconds = total_seconds + 1;
+      previoussecs = currentsecs;
+
+      if ( total_seconds >= 59 )
+      {
+        minutes = minutes + 1;
+        total_seconds = 0;
+        
+      }
+      if ( minutes >= 2 )
+      {
+        total_seconds = 0;
+        minutes =0;
+        Zero_Level_Flag = false;
+      }
+      
+//      Serial.print("Minutes:");
+//      Serial.println(minutes);
+//      Serial.println();
+//      Serial.print("Seconds:");
+//      Serial.println(total_seconds);     
+     
+    }
+
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(5);
+ // Trigger the sensor by setting the trigPin high for 10 microseconds:
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  
+  // Read the echoPin. pulseIn() returns the duration (length of the pulse) in microseconds:
+int  duration = pulseIn(echoPin, HIGH);
+  
+  // Calculate the distance:
+//  distance = duration*0.034/2;
+  
+distance = (duration/2) / 29.1;
+Serial.print("Distance: ");
+Serial.println(distance);
+  // Print the distance on the Serial Monitor (Ctrl+Shift+M):
+
+  /*
+   * 44 is the distance of the water level from the ultrasonic sensor
+   * when the tank is full.
+   * 64 is the low limit of the water level from the ultrasonic sensor
+   */
+int waterLevelPer = map(distance,44,64, 100, 0);
+
+if(waterLevelPer <= 0)
+{
+  waterLevelPer=0;
+  
+  }
+  
+if (waterLevelPer >= 100)
+{
+  waterLevelPer = 100;
+   }
+    
+if (waterLevelPer >= 90)
+{
+  digitalWrite(relay,LOW);
+   }
+    
+Serial.print("Percentage: ");
+Serial.println(waterLevelPer);
+ 
+  if ((waterLevelPer <= 20) && (Zero_Level_Flag == false))
+{
+  Zero_Level_Flag = true;
+textForSMS =  "level: "; 
+textForSMS = textForSMS + waterLevelPer; 
+textForSMS = textForSMS + "%";
+textForSMS = textForSMS + "\n"; 
+sendSMS(textForSMS);
+//Serial.println(textForSMS);
+//Serial.println("message sent."); 
+textForSMS = ""; 
+delay(200);
+  }
+  
+  
+if(SIM900.available() >0)
+  {
+
+  incoming=SIM900.readString(); 
+  //Serial.println(incoming);
+
+
+String fulldata = getValue(incoming, '%', 0); 
+String password = getValue(incoming, '%', 1); //contains password
+String level= getValue(incoming, '%', 2); //contains motor type dc motor or servo motor
+String relaystate= getValue(incoming, '%', 3); //contains motor type dc motor or servo motor
+
+//Serial.print("value 1: ");
+//Serial.println(password);
+//Serial.print("value 2: ");
+//Serial.println(level);
+//Serial.print("value 3: ");
+//Serial.println(relaystate);
+
+if((password==passcode)&&(level=="level"))
+{
+  textForSMS =  "level: "; 
+textForSMS = textForSMS + waterLevelPer; 
+textForSMS = textForSMS + "%";
+textForSMS = textForSMS + "\n"; 
+ 
+sendSMS(textForSMS);
+//Serial.println(textForSMS);
+//Serial.println("message sent."); 
+textForSMS = ""; 
+delay(200);
+}
+else if((password==passcode)&&(level=="relay")&&(relaystate=="on"))
+{
+ digitalWrite(relay,HIGH);
+ delay(100);
+}
+else if((password==passcode)&&(level=="relay")&&(relaystate=="off"))
+{
+ digitalWrite(relay,LOW);
+ delay(100);
+}
+}  
+}
+
+void sendSMS(String message)
+{
+  SIM900.print("AT+CMGF=1\r");                     // AT command to send SMS message
+  delay(1000);
+ SIM900.println("AT + CMGS = \"+919791468242\"");  // recipient's mobile number, in international format
+ 
+  delay(1000);
+  SIM900.println(message);                         // message to send
+  delay(1000);
+  SIM900.println((char)26);                        // End AT command with a ^Z, ASCII code 26
+  delay(1000); 
+  SIM900.println();
+  delay(100);                                     // give module time to send SMS
+ 
+}
+
+String getValue(String data, char separator, int index)
+{
+    int found = 0;
+    int strIndex[] = { 0, -1 };
+    int maxIndex = data.length() - 1;
+ 
+    for (int i = 0; i <= maxIndex && found <= index; i++) {
+        if (data.charAt(i) == separator || i == maxIndex) {
+            found++;
+            strIndex[0] = strIndex[1] + 1;
+            strIndex[1] = (i == maxIndex) ? i+1 : i;
+        }
+    }
+    return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
+}
